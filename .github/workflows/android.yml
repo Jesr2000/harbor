@@ -1,0 +1,34 @@
+name: Build Android APK
+on:
+  push: {branches: [main]}
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: 17}
+      - run: npm install
+      - run: npx cap add android
+      - name: Brand the app (icon, name, status bar)
+        run: |
+          for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            n=${d%%:*}; s=${d##*:}
+            python3 -c "import sys;from PIL import Image;Image.open('www/icons/icon-512.png').resize((int(sys.argv[2]),)*2).save('android/app/src/main/res/mipmap-%s/ic_launcher.png'%sys.argv[1]);Image.open('www/icons/icon-512.png').resize((int(sys.argv[2]),)*2).save('android/app/src/main/res/mipmap-%s/ic_launcher_round.png'%sys.argv[1]);Image.open('www/icons/icon-512.png').resize((int(sys.argv[2]),)*2).save('android/app/src/main/res/mipmap-%s/ic_launcher_foreground.png'%sys.argv[1])" $n $s || pip install pillow -q
+          done
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*.xml
+      - run: npx cap sync android
+      - name: Build debug APK (installable, shareable)
+        working-directory: android
+        run: ./gradlew assembleDebug
+      - run: cp android/app/build/outputs/apk/debug/app-debug.apk Harbor.apk
+      - uses: actions/upload-artifact@v4
+        with: {name: Harbor-apk, path: Harbor.apk}
+      - name: Publish as a release
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: gh release create "build-${{ github.run_number }}" Harbor.apk --title "Harbor build ${{ github.run_number }}" --notes "Install Harbor.apk on Android (allow installs from this source)." --latest
